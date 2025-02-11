@@ -1,3 +1,8 @@
+import {
+  createFlatProxy,
+  createRecursiveProxy,
+} from './createProxy'
+
 export type ArgumentsType<T> = T extends (...args: infer A) => any ? A : never
 export type ReturnType<T> = T extends (...args: any) => infer R ? R : never
 export type PromisifyFn<T> = ReturnType<T> extends Promise<any>
@@ -42,7 +47,7 @@ export interface EventOptions<Remote> {
   /**
    * Names of remote functions that do not need response.
    */
-  eventNames?: (keyof Remote)[]
+  eventNames?: (keyof Remote)[] | ((path: string) => boolean)
 
   /**
    * Maximum timeout for waiting for response, in milliseconds.
@@ -96,6 +101,10 @@ export type BirpcFn<T> = PromisifyFn<T> & {
   asEvent: (...args: ArgumentsType<T>) => void
 }
 
+type BirpcFunctions<T> = T extends ((...args: any[]) => any) ? BirpcFn<T> : {
+  [K in keyof T]: BirpcFunctions<T[K]>
+}
+
 export interface BirpcGroupFn<T> {
   /**
    * Call the remote function and wait for the result.
@@ -107,13 +116,13 @@ export interface BirpcGroupFn<T> {
   asEvent: (...args: ArgumentsType<T>) => void
 }
 
-export type BirpcReturn<RemoteFunctions, LocalFunctions = Record<string, never>> = {
-  [K in keyof RemoteFunctions]: BirpcFn<RemoteFunctions[K]>
-} & { $functions: LocalFunctions, $close: () => void }
+export type BirpcReturn<RemoteFunctions, LocalFunctions = Record<string, never>> = BirpcFunctions<RemoteFunctions> & { $functions: LocalFunctions, $close: () => void }
 
-export type BirpcGroupReturn<RemoteFunctions> = {
-  [K in keyof RemoteFunctions]: BirpcGroupFn<RemoteFunctions[K]>
+type BirpcGroupFunctions<T> = T extends ((...args: any[]) => any) ? BirpcGroupFn<T> : {
+  [K in keyof T]: BirpcGroupFunctions<T[K]>
 }
+
+export type BirpcGroupReturn<RemoteFunctions> = BirpcGroupFunctions<RemoteFunctions>
 
 export interface BirpcGroup<RemoteFunctions, LocalFunctions = Record<string, never>> {
   readonly clients: BirpcReturn<RemoteFunctions, LocalFunctions>[]
@@ -184,13 +193,14 @@ export function createBirpc<RemoteFunctions = Record<string, never>, LocalFuncti
     post,
     on,
     off = () => {},
-    eventNames = [],
+    eventNames,
     serialize = defaultSerialize,
     deserialize = defaultDeserialize,
     resolver,
     bind = 'rpc',
     timeout = DEFAULT_TIMEOUT,
   } = options
+  const isEventName = typeof eventNames === 'function' ? eventNames : (key: string) => eventNames?.includes(key as any)
 
   const rpcPromiseMap = new Map<string, {
     resolve: (arg: any) => void
@@ -202,69 +212,76 @@ export function createBirpc<RemoteFunctions = Record<string, never>, LocalFuncti
   let _promise: Promise<any> | any
   let closed = false
 
-  const rpc = new Proxy({}, {
-    get(_, method: string) {
-      if (method === '$functions')
-        return functions
-
-      if (method === '$close')
-        return close
-
-      // catch if "createBirpc" is returned from async function
-      if (method === 'then' && !eventNames.includes('then' as any) && !('then' in functions))
-        return undefined
-
-      const sendEvent = (...args: any[]) => {
-        post(serialize(<Request>{ m: method, a: args, t: TYPE_REQUEST }))
-      }
-      if (eventNames.includes(method as any)) {
-        sendEvent.asEvent = sendEvent
-        return sendEvent
-      }
-      const sendCall = async (...args: any[]) => {
-        if (closed)
-          throw new Error(`[birpc] rpc is closed, cannot call "${method}"`)
-        if (_promise) {
-          // Wait if `on` is promise
-          try {
-            await _promise
-          }
-          finally {
-            // don't keep resolved promise hanging
-            _promise = undefined
-          }
+  const createCall = (method: string) => {
+    const sendEvent = (...args: any[]) => {
+      post(serialize(<Request>{ m: method, a: args, t: TYPE_REQUEST }))
+    }
+    if (isEventName(method)) {
+      sendEvent.asEvent = sendEvent
+      return sendEvent
+    }
+    const sendCall = async (...args: any[]) => {
+      if (closed)
+        throw new Error(`[birpc] rpc is closed, cannot call "${method}"`)
+      if (_promise) {
+        // Wait if `on` is promise
+        try {
+          await _promise
         }
-        return new Promise((resolve, reject) => {
-          const id = nanoid()
-          let timeoutId: ReturnType<typeof setTimeout> | undefined
-
-          if (timeout >= 0) {
-            timeoutId = setTimeout(() => {
-              try {
-                // Custom onTimeoutError handler can throw its own error too
-                const handleResult = options.onTimeoutError?.(method, args)
-                if (handleResult !== true)
-                  throw new Error(`[birpc] timeout on calling "${method}"`)
-              }
-              catch (e) {
-                reject(e)
-              }
-              rpcPromiseMap.delete(id)
-            }, timeout)
-
-            // For node.js, `unref` is not available in browser-like environments
-            if (typeof timeoutId === 'object')
-              timeoutId = timeoutId.unref?.()
-          }
-
-          rpcPromiseMap.set(id, { resolve, reject, timeoutId, method })
-          post(serialize(<Request>{ m: method, a: args, i: id, t: 'q' }))
-        })
+        finally {
+          // don't keep resolved promise hanging
+          _promise = undefined
+        }
       }
-      sendCall.asEvent = sendEvent
-      return sendCall
+      return new Promise((resolve, reject) => {
+        const id = nanoid()
+        let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+        if (timeout >= 0) {
+          timeoutId = setTimeout(() => {
+            try {
+              // Custom onTimeoutError handler can throw its own error too
+              const handleResult = options.onTimeoutError?.(method, args)
+              if (handleResult !== true)
+                throw new Error(`[birpc] timeout on calling "${method}"`)
+            }
+            catch (e) {
+              reject(e)
+            }
+            rpcPromiseMap.delete(id)
+          }, timeout)
+
+          // For node.js, `unref` is not available in browser-like environments
+          if (typeof timeoutId === 'object')
+            timeoutId = timeoutId.unref?.()
+        }
+
+        rpcPromiseMap.set(id, { resolve, reject, timeoutId, method })
+        post(serialize(<Request>{ m: method, a: args, i: id, t: 'q' }))
+      })
+    }
+    sendCall.asEvent = sendEvent
+    return sendCall
+  }
+  const proxy = createRecursiveProxy<BirpcFunctions<RemoteFunctions>>(
+    ({ path, args }) => {
+      const fullPath = path.join('.')
+      return createCall(fullPath)(...args)
     },
-  }) as BirpcReturn<RemoteFunctions, LocalFunctions>
+  )
+
+  const rpc = createFlatProxy<BirpcReturn<RemoteFunctions, LocalFunctions>>((method) => {
+    if (method === '$functions')
+      return functions
+
+    if (method === '$close')
+      return close
+
+    // catch if "createBirpc" is returned from async function
+    if (method === 'then' && !isEventName('then') && !('then' in functions))
+      return undefined
+    return proxy[method]
+  })
 
   function close() {
     closed = true
@@ -290,9 +307,10 @@ export function createBirpc<RemoteFunctions = Record<string, never>, LocalFuncti
     if (msg.t === TYPE_REQUEST) {
       const { m: method, a: args } = msg
       let result, error: any
-      const fn = resolver
-        ? resolver(method, (functions as any)[method])
-        : (functions as any)[method]
+
+      let fn: any = getFnByPath(method, functions)
+      if (resolver)
+        fn = resolver(method, fn)
 
       if (!fn) {
         error = new Error(`[birpc] function "${method}" not found`)
@@ -369,7 +387,7 @@ export function cachedMap<T, R>(items: T[], fn: ((i: T) => R)): R[] {
   })
 }
 
-export function createBirpcGroup<RemoteFunctions = Record<string, never>, LocalFunctions extends object = Record<string, never>>(
+export function createBirpcGroup<RemoteFunctions = Record<string, never>, LocalFunctions extends Record<string, never> = Record<string, never>>(
   functions: LocalFunctions,
   channels: ChannelOptions[] | (() => ChannelOptions[]),
   options: EventOptions<RemoteFunctions> = {},
@@ -377,19 +395,23 @@ export function createBirpcGroup<RemoteFunctions = Record<string, never>, LocalF
   const getChannels = () => typeof channels === 'function' ? channels() : channels
   const getClients = (channels = getChannels()) => cachedMap(channels, s => createBirpc(functions, { ...options, ...s }))
 
-  const broadcastProxy = new Proxy({}, {
-    get(_, method) {
-      const client = getClients()
-      const callbacks = client.map(c => (c as any)[method])
-      const sendCall = (...args: any[]) => {
-        return Promise.all(callbacks.map(i => i(...args)))
-      }
-      sendCall.asEvent = (...args: any[]) => {
-        callbacks.map(i => i.asEvent(...args))
-      }
-      return sendCall
+  const createCall = (method: string) => {
+    const client = getClients()
+    const callbacks = client.map(c => (c as any)[method])
+    const sendCall = (...args: any[]) => {
+      return Promise.all(callbacks.map(i => i(...args)))
+    }
+    sendCall.asEvent = (...args: any[]) => {
+      callbacks.map(i => i.asEvent(...args))
+    }
+    return sendCall
+  }
+  const broadcastProxy = createRecursiveProxy<BirpcGroupReturn<RemoteFunctions>>(
+    ({ path, args }) => {
+      const fullPath = path.join('.')
+      return createCall(fullPath)(...args)
     },
-  }) as BirpcGroupReturn<RemoteFunctions>
+  )
 
   function updateChannels(fn?: ((channels: ChannelOptions[]) => void)) {
     const channels = getChannels()
@@ -423,4 +445,23 @@ function nanoid(size = 21) {
   while (i--)
     id += urlAlphabet[(random() * 64) | 0]
   return id
+}
+
+function getFnByPath(
+  path: string,
+  functions: any,
+) {
+  let fn: ((...args: any) => any) | null = null
+
+  while (!fn) {
+    const key = Object.keys(functions).find(key => path.startsWith(key))
+    if (!key)
+      return null
+    functions = functions[key]
+    if (key === path && typeof functions === 'function')
+      fn = functions
+    path = path.slice(key.length + 1)
+  }
+
+  return fn
 }
