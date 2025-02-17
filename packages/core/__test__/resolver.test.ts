@@ -1,6 +1,6 @@
 import { MessageChannel } from 'node:worker_threads'
 import { expect, it } from 'vitest'
-import { createBirpc } from '../src'
+import { createRPC } from '../src'
 import * as Alice from './alice'
 import * as Bob from './bob'
 
@@ -10,7 +10,7 @@ type AliceFunctions = typeof Alice
 it('resolver', async () => {
   const channel = new MessageChannel()
 
-  const bob = createBirpc<AliceFunctions, BobFunctions>(
+  const bob = createRPC<AliceFunctions, BobFunctions>(
     { ...Bob },
     {
       post: data => channel.port1.postMessage(data),
@@ -20,11 +20,9 @@ it('resolver', async () => {
 
   let customResolverFn: ((...args: any[]) => any) | undefined
 
-  const alice = createBirpc<BobFunctions, AliceFunctions>(
+  const alice = createRPC<BobFunctions, AliceFunctions>(
     { ...Alice },
     {
-      // mark bob's `bump` as an event without response
-      eventNames: ['bump'],
       post: data => channel.port2.postMessage(data),
       on: fn => channel.port2.on('message', fn),
       resolver: (name, fn) => {
@@ -36,19 +34,19 @@ it('resolver', async () => {
   )
 
   // RPCs
-  expect(await bob.hello('Bob'))
+  expect(await bob.hello.invoke('Bob'))
     .toEqual('Hello Bob, my name is Alice')
-  expect(await alice.hi('Alice'))
+  expect(await alice.hi.invoke('Alice'))
     .toEqual('Hi Alice, I am Bob')
 
   // @ts-expect-error `foo` is not defined
-  await expect(bob.foo('Bob'))
+  await expect(bob.foo.invoke('Bob'))
     .rejects
     .toThrow('[birpc] function "foo" not found')
 
   customResolverFn = (a: string) => `Custom resolve function to ${a}`
 
   // @ts-expect-error `foo` is not defined
-  expect(await bob.foo('Bob'))
+  expect(await bob.foo.invoke('Bob'))
     .toBe('Custom resolve function to Bob')
 })

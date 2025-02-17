@@ -1,14 +1,14 @@
 import { nextTick } from 'node:process'
 import { expect, it } from 'vitest'
-import { createBirpc } from '../src'
+import { createRPC } from '../src'
 
 it('stops the rpc promises', async () => {
   expect.assertions(2)
-  const rpc = createBirpc<{ hello: () => string }>({}, {
+  const rpc = createRPC<{ hello: () => string }>({}, {
     on() {},
     post() {},
   })
-  const promise = rpc.hello().then(
+  const promise = rpc.hello.invoke().then(
     () => {
       throw new Error('Promise should not resolve')
     },
@@ -21,5 +21,5 @@ it('stops the rpc promises', async () => {
     rpc.$close()
   })
   await promise
-  await expect(() => rpc.hello()).rejects.toThrow('[birpc] rpc is closed, cannot call "hello"')
+  await expect(() => rpc.hello.invoke()).rejects.toThrow('[birpc] rpc is closed, cannot call "hello"')
 })

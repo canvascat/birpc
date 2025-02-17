@@ -1,6 +1,6 @@
 import { MessageChannel } from 'node:worker_threads'
 import { expect, it } from 'vitest'
-import { createBirpc } from '../src'
+import { createRPC } from '../src'
 import * as Alice from './alice'
 import * as Bob from './bob'
 
@@ -10,7 +10,7 @@ type AliceFunctions = typeof Alice
 it('dynamic', async () => {
   const channel = new MessageChannel()
 
-  const bob = createBirpc<AliceFunctions, BobFunctions>(
+  const bob = createRPC<AliceFunctions, BobFunctions>(
     { ...Bob },
     {
       post: data => channel.port1.postMessage(data),
@@ -18,28 +18,21 @@ it('dynamic', async () => {
     },
   )
 
-  const alice = createBirpc<BobFunctions, AliceFunctions>(
+  const alice = createRPC<BobFunctions, AliceFunctions>(
     { ...Alice },
     {
-      // mark bob's `bump` as an event without response
-      eventNames: ['bump'],
       post: data => channel.port2.postMessage(data),
       on: fn => channel.port2.on('message', fn),
     },
   )
 
   // RPCs
-  expect(await bob.hello('Bob'))
+  expect(await bob.hello.invoke('Bob'))
     .toEqual('Hello Bob, my name is Alice')
-  expect(await alice.hi('Alice'))
+  expect(await alice.hi.invoke('Alice'))
     .toEqual('Hi Alice, I am Bob')
 
-  // replace Alice's `hello` function
-  alice.$functions.hello = (name: string) => {
-    return `Alice says hello to ${name}`
-  }
-
-  expect(await bob.hello('Bob'))
+  expect(await bob.hello.invoke('Bob'))
     .toEqual('Alice says hello to Bob')
 
   // Adding new functions
@@ -49,6 +42,6 @@ it('dynamic', async () => {
   }
 
   // @ts-expect-error `foo` is not defined
-  expect(await bob.foo('Bob'))
+  expect(await bob.foo.invoke('Bob'))
     .toEqual('A random function, called by Bob')
 })

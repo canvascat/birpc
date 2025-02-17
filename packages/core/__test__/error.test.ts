@@ -1,6 +1,6 @@
 import { MessageChannel } from 'node:worker_threads'
 import { expect, it } from 'vitest'
-import { createBirpc } from '../src'
+import { createRPC } from '../src'
 import * as Alice from './alice'
 import * as Bob from './bob'
 
@@ -12,7 +12,7 @@ it('on function error', async () => {
 
   let error: any
 
-  const _bob = createBirpc<AliceFunctions, BobFunctions>(
+  const _bob = createRPC<AliceFunctions, BobFunctions>(
     { ...Bob },
     {
       post: data => channel.port1.postMessage(data),
@@ -23,11 +23,9 @@ it('on function error', async () => {
     },
   )
 
-  const alice = createBirpc<BobFunctions, AliceFunctions>(
+  const alice = createRPC<BobFunctions, AliceFunctions>(
     { ...Alice },
     {
-      // mark bob's `bump` as an event without response
-      eventNames: ['bump'],
       post: data => channel.port2.postMessage(data),
       on: fn => channel.port2.on('message', fn),
     },
@@ -35,7 +33,7 @@ it('on function error', async () => {
 
   try {
     // @ts-expect-error `foo` is not defined
-    await alice.foo('Bob')
+    await alice.foo.invoke('Bob')
   }
   catch {
   }
@@ -56,7 +54,7 @@ it('on serialize error', async () => {
 
   let error: any
 
-  const _bob = createBirpc<AliceFunctions, BobFunctions>(
+  const _bob = createRPC<AliceFunctions, BobFunctions>(
     { ...Bob },
     {
       serialize: (d) => {
@@ -73,18 +71,16 @@ it('on serialize error', async () => {
     },
   )
 
-  const alice = createBirpc<BobFunctions, AliceFunctions>(
+  const alice = createRPC<BobFunctions, AliceFunctions>(
     { ...Alice },
     {
-      // mark bob's `bump` as an event without response
-      eventNames: ['bump'],
       post: data => channel.port2.postMessage(data),
       on: fn => channel.port2.on('message', fn),
     },
   )
 
   try {
-    await alice.hi('Bob')
+    await alice.hi.invoke('Bob')
   }
   catch {}
 
@@ -104,7 +100,7 @@ it('on parse error', async () => {
 
   let error: any
 
-  const _bob = createBirpc<AliceFunctions, BobFunctions>(
+  const _bob = createRPC<AliceFunctions, BobFunctions>(
     { ...Bob },
     {
       deserialize: () => {
@@ -119,18 +115,17 @@ it('on parse error', async () => {
     },
   )
 
-  const alice = createBirpc<BobFunctions, AliceFunctions>(
+  const alice = createRPC<BobFunctions, AliceFunctions>(
     { ...Alice },
     {
-      // mark bob's `bump` as an event without response
-      eventNames: ['bump'],
+
       post: data => channel.port2.postMessage(data),
       on: fn => channel.port2.on('message', fn),
     },
   )
 
   try {
-    alice.hi('Bob')
+    alice.hi.invoke('Bob')
   }
   catch {}
 

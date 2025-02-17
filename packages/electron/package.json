@@ -1,0 +1,44 @@
+{
+  "name": "@tipc/electron",
+  "version": "1.0.0",
+  "packageManager": "pnpm@10.4.1",
+  "description": "",
+  "author": "",
+  "license": "ISC",
+  "keywords": [
+    "ipc",
+    "electron"
+  ],
+  "exports": {
+    "./main": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./renderer": {
+      "types": "./dist/renderer.d.ts",
+      "import": "./dist/renderer.mjs",
+      "require": "./dist/renderer.cjs"
+    },
+    "./preload": {
+      "types": "./dist/preload.d.ts",
+      "import": "./dist/preload.mjs",
+      "require": "./dist/preload.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "peerDependencies": {
+    "electron": "^30.0.1"
+  },
+  "dependencies": {
+    "@tipc/core": "workspace:^"
+  },
+  "devDependencies": {
+    "electron": "^30.0.1"
+  }
+}

@@ -1,7 +1,7 @@
 import type * as Alice from './alice'
 import { MessageChannel } from 'node:worker_threads'
 import { expect, it, vi } from 'vitest'
-import { createBirpc } from '../src'
+import { createRPC } from '../src'
 import * as Bob from './bob'
 
 type AliceFunctions = typeof Alice
@@ -10,7 +10,7 @@ type BobFunctions = typeof Bob
 it('timeout', async () => {
   const channel = new MessageChannel()
 
-  const bob = createBirpc<AliceFunctions, BobFunctions>(
+  const bob = createRPC<AliceFunctions, BobFunctions>(
     Bob,
     {
       post: data => channel.port1.postMessage(data),
@@ -20,7 +20,7 @@ it('timeout', async () => {
   )
 
   try {
-    await bob.hello('Bob')
+    await bob.hello.invoke('Bob')
     expect(1).toBe(2)
   }
   catch (e) {
@@ -32,7 +32,7 @@ it('custom onTimeoutError', async () => {
   const channel = new MessageChannel()
   const onTimeout = vi.fn()
 
-  const bob = createBirpc<AliceFunctions, BobFunctions>(
+  const bob = createRPC<AliceFunctions, BobFunctions>(
     Bob,
     {
       post: data => channel.port1.postMessage(data),
@@ -46,7 +46,7 @@ it('custom onTimeoutError', async () => {
   )
 
   try {
-    await bob.hello('Bob')
+    await bob.hello.invoke('Bob')
     expect(1).toBe(2)
   }
   catch (e) {
@@ -59,7 +59,7 @@ it('custom onTimeoutError without custom error', async () => {
   const channel = new MessageChannel()
   const onTimeout = vi.fn()
 
-  const bob = createBirpc<AliceFunctions, BobFunctions>(
+  const bob = createRPC<AliceFunctions, BobFunctions>(
     Bob,
     {
       post: data => channel.port1.postMessage(data),
@@ -72,7 +72,7 @@ it('custom onTimeoutError without custom error', async () => {
   )
 
   try {
-    await bob.hello('Bob')
+    await bob.hello.invoke('Bob')
     expect(1).toBe(2)
   }
   catch (e) {
